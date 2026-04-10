@@ -78,43 +78,54 @@ if "usuario_id" not in st.session_state:
 # --- SISTEMA DE LOGIN E REGISTRO ---
 if st.session_state.usuario_id is None:
     init_db()
-    st.title("🔐 Acesso ao Gerenciador de Apostas")
-    tab_login, tab_registro = st.tabs(["Entrar", "Criar Conta"])
     
-    with tab_login:
-        with st.form("form_login"):
-            nome = st.text_input("Nome de Usuário")
-            senha = st.text_input("Senha", type="password")
-            if st.form_submit_button("Entrar", use_container_width=True):
-                conn = sqlite3.connect(ARQUIVO_DADOS)
-                c = conn.cursor()
-                c.execute('SELECT id FROM usuarios WHERE nome = ? AND senha = ?', (nome, hash_senha(senha)))
-                user = c.fetchone()
-                conn.close()
-                if user:
-                    st.session_state.usuario_id = user[0]
-                    st.rerun()
-                else:
-                    st.error("Nome ou senha incorretos.")
-                    
-    with tab_registro:
-        with st.form("form_registro"):
-            novo_nome = st.text_input("Nome de Usuário")
-            nova_senha = st.text_input("Senha", type="password")
-            if st.form_submit_button("Registrar Conta", use_container_width=True):
-                if novo_nome and nova_senha:
+    # Espaçamento para centralizar verticalmente
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    
+    # Criação de colunas para centralizar a caixa de login no meio da tela (Layout: 1, 1.2, 1)
+    col_esq, col_centro, col_dir = st.columns([1, 1.2, 1])
+    
+    with col_centro:
+        st.markdown("<h2 style='text-align: center;'>🔐 Gerenciador de Apostas</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: gray;'>Entre ou crie sua conta para acessar a banca.</p>", unsafe_allow_html=True)
+        st.write("")
+        
+        tab_login, tab_registro = st.tabs(["Entrar", "Criar Conta"])
+        
+        with tab_login:
+            with st.form("form_login"):
+                nome = st.text_input("Nome de Usuário")
+                senha = st.text_input("Senha", type="password")
+                if st.form_submit_button("Entrar", use_container_width=True):
                     conn = sqlite3.connect(ARQUIVO_DADOS)
                     c = conn.cursor()
-                    try:
-                        c.execute('INSERT INTO usuarios (nome, senha, banca) VALUES (?, ?, ?)', (novo_nome, hash_senha(nova_senha), BANCA_INICIAL))
-                        conn.commit()
-                        st.success("Conta criada com sucesso! Você já pode fazer login.")
-                    except sqlite3.IntegrityError:
-                        st.error("Este nome de usuário já está em uso. Tente outro.")
-                    finally:
-                        conn.close()
-                else:
-                    st.error("Preencha todos os campos.")
+                    c.execute('SELECT id FROM usuarios WHERE nome = ? AND senha = ?', (nome, hash_senha(senha)))
+                    user = c.fetchone()
+                    conn.close()
+                    if user:
+                        st.session_state.usuario_id = user[0]
+                        st.rerun()
+                    else:
+                        st.error("Nome ou senha incorretos.")
+                        
+        with tab_registro:
+            with st.form("form_registro"):
+                novo_nome = st.text_input("Nome de Usuário")
+                nova_senha = st.text_input("Senha", type="password")
+                if st.form_submit_button("Registrar Conta", use_container_width=True):
+                    if novo_nome and nova_senha:
+                        conn = sqlite3.connect(ARQUIVO_DADOS)
+                        c = conn.cursor()
+                        try:
+                            c.execute('INSERT INTO usuarios (nome, senha, banca) VALUES (?, ?, ?)', (novo_nome, hash_senha(nova_senha), BANCA_INICIAL))
+                            conn.commit()
+                            st.success("Conta criada com sucesso! Você já pode fazer login.")
+                        except sqlite3.IntegrityError:
+                            st.error("Este nome de usuário já está em uso. Tente outro.")
+                        finally:
+                            conn.close()
+                    else:
+                        st.error("Preencha todos os campos.")
     st.stop() # Bloqueia o carregamento do app se não logado
 
 if "banca" not in st.session_state:

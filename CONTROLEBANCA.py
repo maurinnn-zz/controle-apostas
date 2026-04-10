@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import sqlite3
 import os
 from datetime import datetime
+import hashlib
 
 # Configuração inicial da página
 st.set_page_config(page_title="Gerenciador de Apostas Premium", page_icon="💰", layout="wide")
@@ -17,26 +18,49 @@ META_LUCRO = 10000.0
 def init_db():
     conn = sqlite3.connect(ARQUIVO_DADOS)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS configuracao (id INTEGER PRIMARY KEY, banca REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT UNIQUE,
+        senha TEXT,
+        banca REAL
+    )''')
+    
+    # Migração caso a tabela tenha sido criada com 'email' nos testes anteriores
+    c.execute("PRAGMA table_info(usuarios)")
+    colunas_usuarios = [col[1] for col in c.fetchall()]
+    if "email" in colunas_usuarios:
+        c.execute("ALTER TABLE usuarios RENAME COLUMN email TO nome")
+
     c.execute('''CREATE TABLE IF NOT EXISTS historico (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER,
         data TEXT, valor REAL, odd REAL, retorno REAL, resultado TEXT,
         lucro_prejuizo REAL, casa TEXT, campeonato TEXT, jogo TEXT, mercado TEXT
     )''')
-    c.execute('SELECT banca FROM configuracao WHERE id = 1')
-    if not c.fetchone():
-        c.execute('INSERT INTO configuracao (id, banca) VALUES (1, ?)', (BANCA_INICIAL,))
+    
+    # Migração de dados para evitar erro em BDs locais antigos
+    c.execute("PRAGMA table_info(historico)")
+    colunas = [col[1] for col in c.fetchall()]
+    if "usuario_id" not in colunas and colunas:
+        c.execute("ALTER TABLE historico ADD COLUMN usuario_id INTEGER")
+        c.execute("INSERT OR IGNORE INTO usuarios (id, nome, senha, banca) VALUES (1, 'admin', '', ?)", (BANCA_INICIAL,))
+        c.execute("UPDATE historico SET usuario_id = 1 WHERE usuario_id IS NULL")
+        
     conn.commit()
     conn.close()
 
-def carregar_dados():
+def hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+def carregar_dados(usuario_id):
     init_db()
     conn = sqlite3.connect(ARQUIVO_DADOS)
     c = conn.cursor()
-    c.execute('SELECT banca FROM configuracao WHERE id = 1')
-    banca = c.fetchone()[0]
+    c.execute('SELECT banca FROM usuarios WHERE id = ?', (usuario_id,))
+    user = c.fetchone()
+    banca = user[0] if user else BANCA_INICIAL
     
-    c.execute('SELECT id, data, valor, odd, retorno, resultado, lucro_prejuizo, casa, campeonato, jogo, mercado FROM historico ORDER BY id')
+    c.execute('SELECT id, data, valor, odd, retorno, resultado, lucro_prejuizo, casa, campeonato, jogo, mercado FROM historico WHERE usuario_id = ? ORDER BY id', (usuario_id,))
     historico = []
     for row in c.fetchall():
         historico.append({
@@ -48,8 +72,53 @@ def carregar_dados():
     return banca, historico
 
 # Inicializar estado da sessão
+if "usuario_id" not in st.session_state:
+    st.session_state.usuario_id = None
+
+# --- SISTEMA DE LOGIN E REGISTRO ---
+if st.session_state.usuario_id is None:
+    init_db()
+    st.title("🔐 Acesso ao Gerenciador de Apostas")
+    tab_login, tab_registro = st.tabs(["Entrar", "Criar Conta"])
+    
+    with tab_login:
+        with st.form("form_login"):
+            nome = st.text_input("Nome de Usuário")
+            senha = st.text_input("Senha", type="password")
+            if st.form_submit_button("Entrar", use_container_width=True):
+                conn = sqlite3.connect(ARQUIVO_DADOS)
+                c = conn.cursor()
+                c.execute('SELECT id FROM usuarios WHERE nome = ? AND senha = ?', (nome, hash_senha(senha)))
+                user = c.fetchone()
+                conn.close()
+                if user:
+                    st.session_state.usuario_id = user[0]
+                    st.rerun()
+                else:
+                    st.error("Nome ou senha incorretos.")
+                    
+    with tab_registro:
+        with st.form("form_registro"):
+            novo_nome = st.text_input("Nome de Usuário")
+            nova_senha = st.text_input("Senha", type="password")
+            if st.form_submit_button("Registrar Conta", use_container_width=True):
+                if novo_nome and nova_senha:
+                    conn = sqlite3.connect(ARQUIVO_DADOS)
+                    c = conn.cursor()
+                    try:
+                        c.execute('INSERT INTO usuarios (nome, senha, banca) VALUES (?, ?, ?)', (novo_nome, hash_senha(nova_senha), BANCA_INICIAL))
+                        conn.commit()
+                        st.success("Conta criada com sucesso! Você já pode fazer login.")
+                    except sqlite3.IntegrityError:
+                        st.error("Este nome de usuário já está em uso. Tente outro.")
+                    finally:
+                        conn.close()
+                else:
+                    st.error("Preencha todos os campos.")
+    st.stop() # Bloqueia o carregamento do app se não logado
+
 if "banca" not in st.session_state:
-    banca_salva, historico_salvo = carregar_dados()
+    banca_salva, historico_salvo = carregar_dados(st.session_state.usuario_id)
     st.session_state.banca = banca_salva
     st.session_state.historico = historico_salvo
 
@@ -92,13 +161,13 @@ def registrar_aposta(resultado, valor, odd, casa, campeonato, jogo, mercado):
     
     conn = sqlite3.connect(ARQUIVO_DADOS)
     c = conn.cursor()
-    c.execute('''INSERT INTO historico (data, valor, odd, retorno, resultado, lucro_prejuizo, casa, campeonato, jogo, mercado)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', (
-                     aposta["Data"], aposta["Valor"], aposta["Odd"], aposta["Retorno"], aposta["Resultado"], aposta["Lucro/Prejuízo"],
+    c.execute('''INSERT INTO historico (usuario_id, data, valor, odd, retorno, resultado, lucro_prejuizo, casa, campeonato, jogo, mercado)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', (
+                     st.session_state.usuario_id, aposta["Data"], aposta["Valor"], aposta["Odd"], aposta["Retorno"], aposta["Resultado"], aposta["Lucro/Prejuízo"],
                      aposta["Casa de Apostas"], aposta["Campeonato"], aposta["Jogo"], aposta["Mercado"]
                  ))
     aposta["id"] = c.lastrowid
-    c.execute('UPDATE configuracao SET banca = ? WHERE id = 1', (st.session_state.banca,))
+    c.execute('UPDATE usuarios SET banca = ? WHERE id = ?', (st.session_state.banca, st.session_state.usuario_id))
     conn.commit()
     conn.close()
 
@@ -108,6 +177,11 @@ def registrar_aposta(resultado, valor, odd, casa, campeonato, jogo, mercado):
 
 # --- SIDEBAR: OPÇÕES ---
 st.sidebar.header("🛠️ Opções")
+
+if st.sidebar.button("🚪 Sair da Conta", use_container_width=True):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
 
 with st.sidebar.expander("📝 Nova Aposta", expanded=True):
     with st.form("form_aposta", clear_on_submit=True):
@@ -251,7 +325,7 @@ with tab_hist:
                     conn = sqlite3.connect(ARQUIVO_DADOS)
                     c = conn.cursor()
                     c.execute('DELETE FROM historico WHERE id = ?', (aposta_removida["id"],))
-                    c.execute('UPDATE configuracao SET banca = ? WHERE id = 1', (st.session_state.banca,))
+                    c.execute('UPDATE usuarios SET banca = ? WHERE id = ?', (st.session_state.banca, st.session_state.usuario_id))
                     conn.commit()
                     conn.close()
 
@@ -274,8 +348,8 @@ with tab_hist:
                 
                 conn = sqlite3.connect(ARQUIVO_DADOS)
                 c = conn.cursor()
-                c.execute('DELETE FROM historico')
-                c.execute('UPDATE configuracao SET banca = ? WHERE id = 1', (BANCA_INICIAL,))
+                c.execute('DELETE FROM historico WHERE usuario_id = ?', (st.session_state.usuario_id,))
+                c.execute('UPDATE usuarios SET banca = ? WHERE id = ?', (BANCA_INICIAL, st.session_state.usuario_id))
                 conn.commit()
                 conn.close()
 

@@ -79,8 +79,8 @@ if "usuario_id" not in st.session_state:
 if st.session_state.usuario_id is None:
     init_db()
     
-    # Espaçamento para centralizar verticalmente
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    # Espaçamento reduzido para deixar a caixa um pouco acima do centro e evitar barra de rolagem (scroll)
+    st.markdown("<br>", unsafe_allow_html=True)
     
     # Criação de colunas para centralizar a caixa de login no meio da tela (Layout: 1, 1.2, 1)
     col_esq, col_centro, col_dir = st.columns([1, 1.2, 1])
